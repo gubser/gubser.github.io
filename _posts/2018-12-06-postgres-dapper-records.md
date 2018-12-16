@@ -199,4 +199,4 @@ getUpdateCommand<UpperFruit> "fruit" "FruitId"
 ```
 
 ## Source Code
-https://github.com/gubser/dapper-npgsql-persistence
+[https://github.com/gubser/dapper-npgsql-persistence](https://github.com/gubser/dapper-npgsql-persistence)
