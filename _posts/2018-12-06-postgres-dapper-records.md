@@ -3,7 +3,7 @@ title:  "Lightweight persistence layer with PostgreSQL, Dapper and F# records"
 ---
 ## Lightweight persistence layer with PostgreSQL, Dapper and F# records
 
-I needed a simple way to store F# records into a postgres database. 
+I needed a simple way to store F# records into a postgres database.
 
 Using [Npgsql](http://www.npgsql.org/) and [Dapper](https://github.com/StackExchange/Dapper)
 querying the database is quite easy:
@@ -132,6 +132,15 @@ let deleteAsync tableName keyName (id: obj) = async {
 
     do! conn.ExecuteAsync(command, param) |> Async.AwaitTask |> Async.Ignore
 }
+
+let loadAsync<'a> tableName keyName (id: obj) = async {
+    use conn = new NpgsqlConnection(connectionString)
+
+    let command = sprintf "SELECT * FROM %s WHERE %s = @%s" tableName keyName keyName
+    let param = readOnlyDict [ keyName, id ]
+
+    return! querySingleAsync<'a> command param
+}
 ```
 
 ## Using pascal case
@@ -190,4 +199,4 @@ getUpdateCommand<UpperFruit> "fruit" "FruitId"
 ```
 
 ## Source Code
-tbd
+https://github.com/gubser/dapper-npgsql-persistence
