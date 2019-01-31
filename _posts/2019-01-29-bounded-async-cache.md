@@ -117,10 +117,10 @@ member __.Get key = async {
 Cache read was the easy part. Now it gets messy because of this [property of ConcurrentDictionary described in the Docs](https://docs.microsoft.com/en-us/dotnet/api/system.collections.concurrent.concurrentdictionary-2?view=netstandard-2.0#remarks):
 > For modifications and write operations to the dictionary, ConcurrentDictionary<TKey,TValue>  uses fine-grained locking to ensure thread safety. (Read operations on the dictionary are performed in a lock-free manner.) However, delegates for these methods are called outside the locks to avoid the problems that can arise from executing unknown code under a lock. Therefore, the code executed by these delegates is not subject to the atomicity of the operation.
 
-In order to guarantee that nobody else has started a request in the meantime, we need to ensure atomicity ourselves. That's why I added a write lock. In `getOrRequest` we do almost the same thing as `Get`. But in addition, we acquire the lock and add a `PendingRequest` using `startRequestTask`. Note that we hold the lock only for a very brief period of time between reading the cache and creating the PendingRequest.
+In order to guarantee that nobody else has started a request in the meantime, we need to ensure atomicity ourselves. That's why I added a write lock. In `getOrRequest` we acquire the lock, make sure the value is still missing and then start the fetch operation with `startRequestTask`. Note that we hold the lock only for a very brief period of time between reading the cache and creating the PendingRequest.
 
-Within the Task created by `startRequestTask` we can finally call `request`, create a `CachedValue` and store it in the cache (which will replace the existing `PendingRequest` there).
-If there is an exception, the `PendingRequest` is removed and anyone that waits on this task (remember `accessValue` from above?) gets that exception. Neat.
+Within the Task created by `startRequestTask` we finally call `request`, put the result in a `CachedValue` and store it in the cache (which will replace the existing `PendingRequest` there).
+If there is an exception during the request, the `PendingRequest` is removed and anyone that waits on this task (remember `accessValue` from above?) gets that exception. Neat.
 
 ```fsharp
 let writeLock = new SemaphoreSlim(1, 1)
