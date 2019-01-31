@@ -12,15 +12,15 @@ The [code of the in-memory cache is available as a Gist](https://gist.github.com
 **Avoid duplicate requests:**
 In a traditional cache setting, an algorithm (T1, see diagram below) that wants to fetch a value would first check the cache. If it's a cache miss, it would request the value from the webservice, wait for the answer to arrive and store the value in the cache. After that any later access (T2) would result in a cache hit.
 
-![Traditional cache method](http://www.plantuml.com/plantuml/png/PP0n2iCm34LtdSBGkOCzPYY17A7UIWTZYqRGg45MSlwwRMfmCdt-u_45whC6qMLwck75SH51LfWBeaXpO3NUjjL1quSGHsp85MMbY03UclFj99Zkbqs3RrJwLpipKSuGej8Q5El2blkLX0UpWf-nE-CjW7UV_X14BgJLAlQkCoCfG8-Soa_U)
+![Traditional cache method](/assets/2019-01-29/Concurrent.png)
 
 However, in a multithreaded or asynchronous environment there is a major drawback in this concept: If multiple threads (T1, T2, T3) want to fetch the same uncached value, multiple identical requests are sent to the webservice. For example, this situation is common in optimization algoritms where you use some sort of local search heuristic: Many solutions are generated that differ only in a few parts. To evaluate them you need mostly the same values over and over.
 
-![Problem with multiple consumers](http://www.plantuml.com/plantuml/png/XP0_YuGm4CNx-HI1gw_mJsLn2FQ7SEcEBR9nq42C4XC__vh54MPJMCdxpVl98-qMb0znjg9Rd8xUemk_IuzkC6w4zRWPRLRbWf05ZoMF5OyriDmfFI4ZV-Xten505kBx_ylZyFWvQ_3-N7IXRYDciss7KQRRqqOaXGoYkLAbOn_zQdE9UAwTyNEWqi7iAY3_3tLaSObtEuKiMVTkO7fc05adDdf4brS9oxeHama0BReXpXPU)
+![Problem with multiple consumers](/assets/2019-01-29/ConcurrentNoPending.png)
 
 It would be better if all threads would just wait for a single request to avoid unnecessary communication. Effectively this means that we also need to cache pending requests:
 
-![Cache with pending requests](http://www.plantuml.com/plantuml/png/XP0nJyGm38Lt_uf8h30qwTG17Re_S0AB1J64nhf6IjEIEkNlerQ1u3BSKkczFdzstcbXcpYFGPsdsEUKAFA5elFn2hDDx7i_syWA6ocrb4RA5eG-stuWuRnGMdrF0DYeXxUxHExziSJ0zknNorJq_gsXCjcfqIzBpHRxcCQcKuFdUrNUz4oVcHQkSzZ042ScDQsKzlZJb_KCW7gZV8HCvR8VTdLHtu9h0TSLRZRC9QSv7F32HtDhWH4BpE-2KiUXsqwvAH8u-bVRNmyReRHG1W2mtRZNH1IFnrSRstBx_iUzsf09u4JHvJ5y0m00)
+![Cache with pending requests](/assets/2019-01-29/ConcurrentPending.png)
 
 **Do not consider stale entries:**
 Cache entries should not be used when they get over a certain age.
