@@ -56,7 +56,7 @@ The additional values in `CachedValue` mean:
 - `LastAccessedAt`: Used to sort entries to evict from the cache in LRU order.
 
 ## Cache Logic
-The cache is implemented as a class and holds a reference to a `ConcurrentDictionary`. (The cache parameters `maxCount`, `removeBulkSize`, ... are discussed later in this post.)
+The cache is implemented as a class and holds a reference to a `ConcurrentDictionary`. `request` is the function we want to cache. The other parameters `maxCount`, `removeBulkSize`, `maxRetrievalAge` are discussed in the following section.
 ```fsharp
 type AsyncBoundedCache<'key,'value> (maxCount: int, removeBulkSize: int, maxRetrievalAge: int, request: 'key -> Async<'value>) =
     let cache = ConcurrentDictionary<'key, CacheEntry<'value>>()
@@ -64,7 +64,20 @@ type AsyncBoundedCache<'key,'value> (maxCount: int, removeBulkSize: int, maxRetr
     ...
 ```
 
-Any consumer of this cache will call the `Get` member function in the following code section. If the cache hit (valid or pending cache entry), `Get` returns the value by calling the `accessValue` function. If the cache missed (invalid or missing cache entry), the value is retrieved by calling the `getOrRequest` function. Note how `accessValue` either waits for the task to yield a result or updates the `LastAccessedAt` time.
+The cache can be used like this:
+```
+// the function
+let echo key = async {
+    Async.Sleep 100
+    return sprintf "Hello '%s'" key
+}
+
+// cached version with the same signature as `echo`
+let cachedEcho = AsyncBoundedCache(100, 10, 100, echo).Get
+```
+
+### Lock-free cache read
+Any consumer of this cache will call the `Get` member function in the following code section. If the cache hit a valid value or a pending request, return it via `accessValue`. If the cache missed (invalid or missing cache entry) we go into `getOrRequest`. Note how `accessValue` either waits for the task to yield a result if it's a `PendingRequest` or updates the `LastAccessedAt` time if it's a `CachedValue`.
 I'm still amazed how concise and readable F# allows us to express this.
 
 ```fsharp
@@ -93,23 +106,25 @@ I'm still amazed how concise and readable F# allows us to express this.
         | true, entry when isValidOrPending entry ->
             return! accessValue key entry
         | _ ->
-            return! acquire key
+            return! getOrRequest key
     }
 ```
 
+### On cache miss
 Cache read was the easy part. Now it gets messy because of this [property of ConcurrentDictionary described in the Docs](https://docs.microsoft.com/en-us/dotnet/api/system.collections.concurrent.concurrentdictionary-2?view=netstandard-2.0#remarks):
 > For modifications and write operations to the dictionary, ConcurrentDictionary<TKey,TValue>  uses fine-grained locking to ensure thread safety. (Read operations on the dictionary are performed in a lock-free manner.) However, delegates for these methods are called outside the locks to avoid the problems that can arise from executing unknown code under a lock. Therefore, the code executed by these delegates is not subject to the atomicity of the operation.
 
-So, in order to guarantee that nobody else has started a request in the meantime, we need to ensure atomicity ourselves by introducing a write lock. So what `getOrRequest` does is: acquire the lock, check the cache again and return if the value is found. Otherwise create a task by calling `startRequestTask`.
-Inside `startRequestTask` we can finally call `request`, create a `CachedValue` and store it in the cache (which will replace the existing `PendingRequest` there).
+In order to guarantee that nobody else has started a request in the meantime, we need to ensure atomicity ourselves. That's why I added a write lock. In `getOrRequest` we do almost the same thing as `Get`. But in addition, we acquire the lock and add a `PendingRequest` using `startRequestTask`. Note that we hold the lock only for a very brief period of time between reading the cache and creating the PendingRequest.
+
+Within the Task created by `startRequestTask` we can finally call `request`, create a `CachedValue` and store it in the cache (which will replace the existing `PendingRequest` there).
 If there is an exception, the `PendingRequest` is removed and anyone that waits on this task (remember `accessValue` from above?) gets that exception. Neat.
 
 ```fsharp
     let writeLock = new SemaphoreSlim(1, 1)
 
-    let startAcquireTask key = Async.StartAsTask(async {
+    let startRequestTask key = Async.StartAsTask(async {
         try
-            let! value = acquire key
+            let! value = request key
             let entry = CachedValue { Value = value; RetrievedAt = now(); LastAccessedAt = now() }
 
             // we've got the value. now replace cached entry
@@ -135,9 +150,9 @@ If there is an exception, the `PendingRequest` is removed and anyone that waits 
     })
 
     // Acquire the writeLock, try to get the cached value or pending request.
-    // If its a miss, start a new acquire task.
+    // If its a miss, start a new task.
     // The lock is necessary to avoid two threads to start a new task simultaneously.
-    let acquire key = async {
+    let getOrRequest key = async {
         do! Async.AwaitTask (writeLock.WaitAsync())
         let entry =
             try
@@ -148,8 +163,8 @@ If there is an exception, the `PendingRequest` is removed and anyone that waits 
                 | _ ->
                     havingLockEnsureBound ()
 
-                    // No cache entry found or invalid cache entry -> start a new acquire task
-                    let newEntry = PendingRequest (startAcquireTask key)
+                    // No cache entry found or invalid cache entry -> start a new request task
+                    let newEntry = PendingRequest (startRequestTask key)
                     havingLockSetEntry key newEntry
                     newEntry
             finally
@@ -162,7 +177,7 @@ If you want to get more functional, `startRequestTask` would be a good place to 
 
 Now there are only three interesting functions left to explore: `havingLockSetEntry`, `havingLockEnsureBound` and `havingLockUnsetEntry`.
 
-The functions `havingLockSetEntry` and `havingLockUnsetEntry` are just wrappers around `ConcurrentDictionary.AddOrUpdate` and `ConcurrentDictionary.TryRemove` in order to track the total count of cache entries. I added these because I thought it would [lock the whole dictionary](https://github.com/dotnet/corefx/issues/3357) but apparently [reads are unaffected](https://github.com/dotnet/corefx/blob/a10890f4ffe0fadf090c922578ba0e606ebdd16c/src/System.Collections.Concurrent/src/System/Collections/Concurrent/ConcurrentDictionary.cs#L441). Still, accessing the `ConcurrentDictionary.Count` property is a [surprisingly "expensive" operation](https://github.com/dotnet/corefx/blob/a10890f4ffe0fadf090c922578ba0e606ebdd16c/src/System.Collections.Concurrent/src/System/Collections/Concurrent/ConcurrentDictionary.cs#L939-L982) using a for loop. Still, this is a case of premature optimization and I should remove this unnecessary code.
+The functions `havingLockSetEntry` and `havingLockUnsetEntry` are just wrappers around `ConcurrentDictionary.AddOrUpdate` and `ConcurrentDictionary.TryRemove` in order to track the total count of cache entries. I added these because I thought it would [lock the whole dictionary](https://github.com/dotnet/corefx/issues/3357) but apparently [reads are unaffected](https://github.com/dotnet/corefx/blob/a10890f4ffe0fadf090c922578ba0e606ebdd16c/src/System.Collections.Concurrent/src/System/Collections/Concurrent/ConcurrentDictionary.cs#L441). Still, accessing the `ConcurrentDictionary.Count` property is a [surprisingly "expensive" operation](https://github.com/dotnet/corefx/blob/a10890f4ffe0fadf090c922578ba0e606ebdd16c/src/System.Collections.Concurrent/src/System/Collections/Concurrent/ConcurrentDictionary.cs#L939-L982) using a for loop. However, those functions are a case of premature optimization and should be removed.
 
 The job of `havingLockEnsureBound` is to make sure that we never exceed `maxCount` elements in the cache. First it evicts `CachedValue`s in LRU order and if that doesn't suffice it starts to evict `PendingRequest`s. Note that any consumer that still holds a reference to `Task` will get the result. It just won't be cached here.
 
