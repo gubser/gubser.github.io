@@ -103,7 +103,7 @@ let accessValue entry = async {
 }
 
 // perform a lock-free read.
-// if the cached value is too old or missing, it starts a new request operation.
+// if the cached value is too old or missing, start a new request operation.
 member __.Get key = async {
     match cache.TryGetValue(key) with
     | true, entry when isValidOrPending entry ->
@@ -157,8 +157,8 @@ let startRequestTask key = Async.StartAsTask(async {
 })
 
 // Acquire the writeLock, try to get the cached value or pending request.
-// If its a miss, start a new request task.
-// The lock is necessary to avoid two threads to start a new task simultaneously.
+// If its a miss, start a new request task. The lock is necessary to
+// avoid two threads to start a new task simultaneously.
 let getOrRequest key = async {
     do! Async.AwaitTask (writeLock.WaitAsync())
     let entry =
@@ -219,8 +219,8 @@ let havingLockEnsureBound () =
             // I don't care which PendingRequest was accessed least recently
             // because I assume every PendingRequest is recent enough.
             // 
-            // any consumer will still hold a reference to the task so they will
-            // receive their answer. it just won't be cached here.
+            // any consumer will still hold a reference to the task so they
+            // will receive their answer. it just won't be cached here.
             let toRemove =
                 cache.Keys
                 |> Seq.truncate countToRemove
