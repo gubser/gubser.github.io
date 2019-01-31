@@ -1,0 +1,96 @@
+@startuml Concurrent
+participant T1
+participant T2
+
+participant Cache
+participant Service
+
+T1 -[#red]> Cache
+
+Cache -[#red]> Service: miss
+activate Service
+Service -[#red]> Cache
+deactivate Service
+activate Cache
+Cache -[#red]> T1
+
+T2 -[#green]> Cache
+Cache -[#green]> T2: hit
+
+@enduml
+
+@startuml ConcurrentNoPending
+participant T1
+participant T2
+participant T3
+participant T4
+
+participant Cache
+participant Service
+
+T1 -[#red]> Cache
+
+Cache -[#red]>o Service: miss
+
+T2 -[#blue]> Cache
+Cache -[#blue]>o Service: miss
+
+T3 -[#Purple]> Cache
+Cache -[#Purple]>o Service: miss
+
+Service -[#red]> Cache
+activate Cache
+Cache -[#red]> T1
+
+Service -[#blue]> Cache
+Cache -[#blue]> T2
+
+Service -[#Purple]> Cache
+Cache -[#Purple]> T3
+
+
+T4 -[#green]> Cache
+Cache -[#green]> T4: hit
+
+@enduml
+
+@startuml ConcurrentPending
+participant T1
+participant T2
+participant T3
+participant T4
+
+participant Cache
+participant Service
+
+T1 -[#red]> Cache
+
+activate Cache
+Cache -[#red]> Service: miss
+activate Service
+Cache -[#red]> T1: hit, PendingRequest
+activate T1
+hnote over T1: Await
+
+T2 -[#blue]> Cache
+Cache -[#blue]> T2: hit, PendingRequest
+activate T2
+hnote over T2: Await
+
+T3 -[#Purple]> Cache
+Cache -[#Purple]> T3: hit, PendingRequest
+activate T3
+hnote over T3: Await
+
+Service -[#red]> Cache: done
+deactivate Service
+
+deactivate T1
+deactivate T2
+deactivate T3
+
+
+T4 -[#green]> Cache
+Cache -[#green]> T4: hit, CachedValue
+
+@enduml
