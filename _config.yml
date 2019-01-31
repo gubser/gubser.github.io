@@ -1,2 +1,5 @@
 theme: jekyll-theme-slate
 title: Elio's Tech Blog
+github:
+  is_project_page: false
+  
