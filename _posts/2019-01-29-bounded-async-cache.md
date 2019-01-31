@@ -5,7 +5,7 @@ title:  "A bounded in-memory cache for async operations written in F#"
 # A bounded in-memory cache for async operations written in F#
 I am currently working on an optimization algorithm that gathers information from map routing services and linear solvers. In order to reduce latency and unnecessary computations to a minimum I decided to add a transparent in-memory cache.
 
-The [code is available as a Gist](https://gist.github.com/gubser/0888d947a701ad11b4b8fdccacdf1ed3) for now. I plan to put it into a proper repository later. It's a single file with less than 200 lines of code (including comments). Built upon [ConcurrentDictionary](https://docs.microsoft.com/en-us/dotnet/api/system.collections.concurrent.concurrentdictionary-2?view=netstandard-2.0), which is suitable for highly concurrent applications.
+The [code of the in-memory cache is available as a Gist](https://gist.github.com/gubser/0888d947a701ad11b4b8fdccacdf1ed3) for now. I plan to put it into a proper repository later. It's a single file with less than 200 lines of code (including comments). Built upon [ConcurrentDictionary](https://docs.microsoft.com/en-us/dotnet/api/system.collections.concurrent.concurrentdictionary-2?view=netstandard-2.0), which is suitable for highly concurrent applications.
 
 ## Design Goals
 
