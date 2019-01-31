@@ -58,7 +58,9 @@ The additional values in `CachedValue` mean:
 ## Cache Logic
 The cache is implemented as a class and holds a reference to a `ConcurrentDictionary`. `request` is the function we want to cache. The other parameters `maxCount`, `removeBulkSize`, `maxRetrievalAge` are discussed in the following section.
 ```fsharp
-type AsyncBoundedCache<'key,'value> (maxCount: int, removeBulkSize: int, maxRetrievalAge: int, request: 'key -> Async<'value>) =
+type AsyncBoundedCache<'key,'value>
+        (maxCount: int, removeBulkSize: int, maxRetrievalAge: int,
+         request: 'key -> Async<'value>) =
     let cache = ConcurrentDictionary<'key, CacheEntry<'value>>()
 
     ...
@@ -81,33 +83,34 @@ Any consumer of this cache will call the `Get` member function in the following 
 I'm still amazed how concise and readable F# allows us to express this.
 
 ```fsharp
-    // Check validity
-    let isValid cachedValue = (now() - cachedValue.RetrievedAt) < maxRetrievalAge
-    
-    let isValidOrPending entry =
-        match entry with
-        | CachedValue value -> isValid value
-        | PendingRequest _ -> true
-    
-    // Get the value from a CacheEntry and update its access time
-    let accessValue key entry = async {
-        match entry with
-        | CachedValue cachedValue ->
-            cachedValue.LastAccessedAt <- now()
-            return cachedValue.Value
-        | PendingRequest task ->
-            return! Async.AwaitTask task
-    }
+// Check validity
+let isValid cachedValue =
+    (now() - cachedValue.RetrievedAt) < maxRetrievalAge
 
-    // perform a lock-free read.
-    // if the cached value is too old or missing, it starts a new request operation.
-    member __.Get key = async {
-        match cache.TryGetValue(key) with
-        | true, entry when isValidOrPending entry ->
-            return! accessValue key entry
-        | _ ->
-            return! getOrRequest key
-    }
+let isValidOrPending entry =
+    match entry with
+    | CachedValue cachedValue -> isValid cachedValue
+    | PendingRequest _ -> true
+
+// Get the value from a CacheEntry and update its access time
+let accessValue entry = async {
+    match entry with
+    | CachedValue cachedValue ->
+        cachedValue.LastAccessedAt <- now()
+        return cachedValue.Value
+    | PendingRequest task ->
+        return! Async.AwaitTask task
+}
+
+// perform a lock-free read.
+// if the cached value is too old or missing, it starts a new request operation.
+member __.Get key = async {
+    match cache.TryGetValue(key) with
+    | true, entry when isValidOrPending entry ->
+        return! accessValue entry
+    | _ ->
+        return! getOrRequest key
+}
 ```
 
 ### On cache miss
@@ -120,123 +123,110 @@ Within the Task created by `startRequestTask` we can finally call `request`, cre
 If there is an exception, the `PendingRequest` is removed and anyone that waits on this task (remember `accessValue` from above?) gets that exception. Neat.
 
 ```fsharp
-    let writeLock = new SemaphoreSlim(1, 1)
+let writeLock = new SemaphoreSlim(1, 1)
 
-    let startRequestTask key = Async.StartAsTask(async {
-        try
-            let! value = request key
-            let entry = CachedValue { Value = value; RetrievedAt = now(); LastAccessedAt = now() }
+let startRequestTask key = Async.StartAsTask(async {
+    try
+        let! value = request key
+        let entry = CachedValue {
+            Value = value;
+            RetrievedAt = now();
+            LastAccessedAt = now()
+        }
 
-            // we've got the value. now replace cached entry
-            do! Async.AwaitTask (writeLock.WaitAsync())
-            try
-                havingLockEnsureBound ()
-                havingLockSetEntry key entry
-            finally
-                writeLock.Release() |> ignore
-            
-            return value
-        with
-        | e ->
-            // something failed. remove cached entry and propagate exception
-            // to anyone that waits on this task
-            do! Async.AwaitTask (writeLock.WaitAsync())
-            try
-                havingLockUnsetEntry key
-            finally
-                writeLock.Release() |> ignore
-
-            return raise e
-    })
-
-    // Acquire the writeLock, try to get the cached value or pending request.
-    // If its a miss, start a new task.
-    // The lock is necessary to avoid two threads to start a new task simultaneously.
-    let getOrRequest key = async {
+        // we've got the value. now replace cached entry
         do! Async.AwaitTask (writeLock.WaitAsync())
-        let entry =
-            try
-                match cache.TryGetValue(key) with
-                | true, existingEntry when isValidOrPending existingEntry ->
-                    // A valid or pending cache entry found, use that.
-                    existingEntry
-                | _ ->
-                    havingLockEnsureBound ()
+        try
+            havingLockEnsureBound ()
+            cache.[key] <- entry
+        finally
+            writeLock.Release() |> ignore
+        
+        return value
+    with
+    | e ->
+        // something failed. remove cached entry and propagate exception
+        // to anyone that waits on this task
+        do! Async.AwaitTask (writeLock.WaitAsync())
+        try
+            cache.TryRemove key |> ignore
+        finally
+            writeLock.Release() |> ignore
 
-                    // No cache entry found or invalid cache entry -> start a new request task
-                    let newEntry = PendingRequest (startRequestTask key)
-                    havingLockSetEntry key newEntry
-                    newEntry
-            finally
-                writeLock.Release() |> ignore
-        return! accessValue key entry
-    }
+        return raise e
+})
+
+// Acquire the writeLock, try to get the cached value or pending request.
+// If its a miss, start a new request task.
+// The lock is necessary to avoid two threads to start a new task simultaneously.
+let getOrRequest key = async {
+    do! Async.AwaitTask (writeLock.WaitAsync())
+    let entry =
+        try
+            // Try again to get the value, now having lock
+            match cache.TryGetValue(key) with
+            | true, existingEntry when isValidOrPending existingEntry ->
+                // A valid or pending cache entry found, use that.
+                existingEntry
+            | _ ->
+                // Start a new request task because only an invalid entry was
+                // found or none at all.
+                havingLockEnsureBound ()
+                let newEntry = PendingRequest (startRequestTask key)
+                cache.[key] <- newEntry
+                newEntry
+        finally
+            writeLock.Release() |> ignore
+    return! accessValue entry
+}
 ```
 
 If you want to get more functional, `startRequestTask` would be a good place to extend the code to react to `Result.Ok` and `Result.Error` when doing [railway oriented programming](https://fsharpforfunandprofit.com/rop/)
 
-Now there are only three interesting functions left to explore: `havingLockSetEntry`, `havingLockEnsureBound` and `havingLockUnsetEntry`.
-
-The functions `havingLockSetEntry` and `havingLockUnsetEntry` are just wrappers around `ConcurrentDictionary.AddOrUpdate` and `ConcurrentDictionary.TryRemove` in order to track the total count of cache entries. I added these because I thought it would [lock the whole dictionary](https://github.com/dotnet/corefx/issues/3357) but apparently [reads are unaffected](https://github.com/dotnet/corefx/blob/a10890f4ffe0fadf090c922578ba0e606ebdd16c/src/System.Collections.Concurrent/src/System/Collections/Concurrent/ConcurrentDictionary.cs#L441). Still, accessing the `ConcurrentDictionary.Count` property is a [surprisingly "expensive" operation](https://github.com/dotnet/corefx/blob/a10890f4ffe0fadf090c922578ba0e606ebdd16c/src/System.Collections.Concurrent/src/System/Collections/Concurrent/ConcurrentDictionary.cs#L939-L982) using a for loop. However, `havingLockSetEntry` and `havingLockUnsetEntry` are a case of premature optimization and should be removed.
-
-The job of `havingLockEnsureBound` is to make sure that we never exceed `maxCount` elements in the cache. First it evicts `CachedValue`s in LRU order and if that doesn't suffice it starts to evict `PendingRequest`s. Note that any consumer that still holds a reference to `Task` will get the result. It just won't be cached here.
+The last function `havingLockEnsureBound` removes excess cache elements.
+First it evicts `CachedValue`s in LRU order and if that doesn't suffice it starts to evict `PendingRequest`s.
+This is computationally expensive because we're sorting all cache elements by access time.
+To make this a seldom used operation, we remove a few extra elements (`removeBulkSize`) as well.
+Before optimizing this further, I need to run some performance experiments.
+Note that any consumer that still holds a reference to `Task` will get the result. It just won't be cached.
 
 ```fsharp
-    let mutable count = 0
+let havingLockEnsureBound () =
+    if cache.Count >= maxCount then
+        // remove excess cached values, and some more while we're at it
+        let countToRemove = (cache.Count - maxCount) + removeBulkSize
+        let toRemoveCached =
+            cache
+            |> Seq.choose (fun kv ->
+                match kv.Value with
+                | CachedValue cachedValue -> Some (kv.Key, cachedValue)
+                | _ -> None
+            )
+            |> Seq.sortBy (fun (_, cachedValue) -> cachedValue.LastAccessedAt)
+            |> Seq.map fst
+            |> Seq.truncate countToRemove
+            |> Seq.toList
+        
+        toRemoveCached |> List.iter (fun e -> cache.TryRemove e |> ignore)
 
-    // Remove a CacheEntry and update count. Needs writeLock.
-    let havingLockUnsetEntry key =
-        match cache.TryRemove(key) with
-        | true, _ -> count <- count - 1
-        | false, _ -> ()
+        // check if we satisfy the bound now
+        if cache.Count >= maxCount then
+            // there are still too many items. above we have only removed
+            // CachedValues. Apparently we have deleted them all and we are
+            // now left with PendingRequests only.
+            let countToRemove = (cache.Count - maxCount) + removeBulkSize
 
-    // Remove entries from the cache until bounds are satisfied. Needs writeLock.
-    let havingLockEnsureBound () =
-        if count >= maxCount then
-            // remove excess cached values, and some more (=removeBulkSize) while we're at it
-            let countToRemove = (count - maxCount) + removeBulkSize
-            let toRemoveCached =
-                cache
-                |> Seq.choose (fun kv ->
-                    match kv.Value with
-                    | CachedValue cachedValue -> Some (kv.Key, cachedValue)
-                    | _ -> None
-                )
-                |> Seq.sortBy (fun (_, cachedValue) -> cachedValue.LastAccessedAt)
-                |> Seq.map fst
+            // I don't care which PendingRequest was accessed least recently
+            // because I assume every PendingRequest is recent enough.
+            // 
+            // any consumer will still hold a reference to the task so they will
+            // receive their answer. it just won't be cached here.
+            let toRemove =
+                cache.Keys
                 |> Seq.truncate countToRemove
                 |> Seq.toList
             
-            toRemoveCached |> List.iter havingLockUnsetEntry
-
-            // check if we satisfy the bound now
-            if count >= maxCount then
-                // there are still too many items. above we have only removed
-                // CachedValues. Apparently we have deleted them all and we are now left with
-                // PendingRequests only.
-                let countToRemove = (count - maxCount) + removeBulkSize
-
-                // I don't care which PendingRequest was accessed least recently
-                // because I assume every PendingRequest is recent enough.
-                // 
-                // any consumer will still hold a reference to the task so they will
-                // receive their answer. it just won't be cached here.
-                let toRemove =
-                    cache.Keys
-                    |> Seq.truncate countToRemove
-                    |> Seq.toList
-                
-                toRemove |> List.iter havingLockUnsetEntry
-
-    // Add an entry to the cache or updates an entry in the cache.
-    // Will evict other cache entries if bound is hit. Needs writeLock.
-    let havingLockSetEntry key entry =
-        havingLockEnsureBound ()
-
-        let addFunc _ = count <- count + 1; entry
-        let updateFunc _ _ = entry
-
-        cache.AddOrUpdate(key, addFunc, updateFunc) |> ignore
+            toRemove |> List.iter (fun e -> cache.TryRemove e |> ignore)
 ```
 
 ## Unit tests and project files
