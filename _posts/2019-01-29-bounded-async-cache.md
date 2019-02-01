@@ -34,6 +34,13 @@ The cache should only store a limited amount of entries. To satisfy this limit, 
 
 **Non-functional requirements:** The algorithm should have a low memory and read overhead as well as being easy to read and maintain.
 
+### Alternative Implementations
+Here are some alternatives I've found in a quick search:
+- Based on MemoryCache: https://tech.mikkohaapanen.com/net-c-cache-class-for-caching-task-objects/
+- Also based on MemoryCache https://www.hanselman.com/blog/EyesWideOpenCorrectCachingIsAlwaysHard.aspx
+- Based on ConcurrentDictionary, but does not prevent duplicate requests https://docs.microsoft.com/en-us/dotnet/standard/parallel-programming/how-to-create-pre-computed-tasks
+
+
 ## Data Structure
 I started with the data structures holding the values. A `CacheEntry` is a discriminated union of either
 - a `CachedValue` record containing the value itself, last access time and retrieval time or
