@@ -1,5 +1,6 @@
 ---
 title:  "Lightweight persistence layer with PostgreSQL, Dapper and F# records"
+comments: true
 ---
 ## Lightweight persistence layer with PostgreSQL, Dapper and F# records
 

@@ -1,5 +1,6 @@
 ---
 title:  "A bounded in-memory cache for async operations written in F#"
+comments: true
 ---
 
 # A bounded in-memory cache for async operations written in F#
