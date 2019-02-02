@@ -75,7 +75,7 @@ type AsyncBoundedCache<'key,'value>
 ```
 
 The cache can be used like this:
-```
+```fsharp
 // the function
 let echo key = async {
     Async.Sleep 100
