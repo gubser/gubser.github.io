@@ -9,3 +9,6 @@ This site currently serves as a collection of useful code snippets during my cod
     </li>
   {% endfor %}
 </ul>
+
+## Piano Corner
+Another passion of mine is <a href="piano.html">playing piano</a>.
