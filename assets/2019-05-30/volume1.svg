@@ -1,0 +1,8 @@
+<svg width="440" height="330" version="1.1" viewBox="0 0 116.417 87.3125" xmlns="http://www.w3.org/2000/svg">
+ <g transform="translate(-2.54242 -205.863)">
+  <path d="m7.83409 238.135 31.8258 15.0084 73.4592-27.4049-31.8258-15.0084z" fill="#6fc26c"/>
+  <path d="m39.6599 253.144v34.74l73.4592-27.4049v-34.74z" fill="#99693a"/>
+  <path d="m7.83409 238.135 31.8258 15.0084v34.74l-31.8258-15.0084z" fill="#bb834b"/>
+  <text transform="skewY(-20.6726)" x="77.527267" y="290.32016" fill="#ffffff" font-family="FreeSans" font-size="9.87778px" letter-spacing="0px" stroke-width=".264583" text-align="center" text-anchor="middle" word-spacing="0px" style="line-height:1.25" xml:space="preserve"><tspan x="77.527267" y="290.32016" fill="#ffffff" font-family="FreeSans" font-weight="600" stroke-width=".264583" text-align="center" text-anchor="middle">300ℓ</tspan></text>
+ </g>
+</svg>
