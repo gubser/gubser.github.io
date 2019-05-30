@@ -238,5 +238,4 @@ let havingLockEnsureBound () =
 ```
 
 ## Unit tests and project files
-I'm currently working on some unit tests and plan to move the code into a proper repository.
 [See this Gist for unit tests](https://gist.github.com/gubser/f527e1fdbb060a77be340442b15fcc55).
