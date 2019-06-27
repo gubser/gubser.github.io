@@ -99,3 +99,7 @@ Then, knowing all inputs and outputs, we can build a dependency graph and find t
   <li>By walking the whole tree starting from the `finish` node, we can determine the order of execution (= a feasible schedule).</li>
 </ol>
 
+---
+
+👉 This post is also featured on [geo.ebp.ch](https://geo.ebp.ch).
+
